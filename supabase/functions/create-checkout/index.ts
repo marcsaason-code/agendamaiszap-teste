@@ -47,7 +47,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    const stripe = new Stripe(stripeSecretKey);
+    const stripe = new Stripe(stripeSecretKey, {
+      apiVersion: "2025-04-30.basil" as any,
+    });
 
     // Avoid creating a second active subscription for the same account.
     const existingSubscriptionId = user.app_metadata?.stripe_subscription_id as string | undefined;
@@ -90,6 +92,14 @@ Deno.serve(async (req) => {
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
+      // Exibe diretamente o formulário de cartão no Stripe Checkout.
+      // Sem esta lista explícita, o Stripe pode priorizar o Link para clientes já cadastrados nele.
+      payment_method_types: ["card"],
+      // Desativa explicitamente o Stripe Link para esta sessão.
+      // Assim o Checkout abre no formulário de cartão, sem a etapa de confirmação do Link.
+      wallet_options: {
+        link: { display: "never" },
+      },
       ...(customerId ? { customer: customerId } : { customer_email: user.email || undefined }),
       line_items: [lineItem],
       success_url: successUrl,
@@ -107,7 +117,7 @@ Deno.serve(async (req) => {
       },
       allow_promotion_codes: false,
       billing_address_collection: "auto",
-    });
+    } as any);
 
     if (!session.url) {
       throw new Error("Stripe não retornou uma URL de checkout");
