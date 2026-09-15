@@ -29,12 +29,20 @@ interface StaffMember {
 
 interface Appointment {
   id: string;
-  client_name: string;
+  client_name?: string;
   service_name: string;
+  service_id?: string;
   date: string;
   time: string;
   status: string;
+  staff_id?: string | null;
   staff_name?: string;
+}
+
+interface PublicBookedSlot {
+  time: string;
+  service_id: string | null;
+  staff_id: string | null;
 }
 
 type ViewMode = "home" | "booking" | "manage";
@@ -85,7 +93,7 @@ const PublicBooking = () => {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [businessHours, setBusinessHours] = useState<BusinessHours | null>(null);
-  const [dayAppointments, setDayAppointments] = useState<Appointment[]>([]);
+  const [dayAppointments, setDayAppointments] = useState<PublicBookedSlot[]>([]);
 
   // Total steps depends on whether there are staff members
   const hasStaff = staffList.length > 0;
@@ -151,29 +159,37 @@ const PublicBooking = () => {
     return generateTimesFromSchedule(businessHours[dayKey]);
   }, [selectedDate, businessHours]);
 
-  // Fetch existing appointments for the selected date
+  // Carrega somente os identificadores necessários para bloquear horários.
+  // Nenhum nome, telefone ou outro dado de cliente é enviado para a página pública.
   useEffect(() => {
     const loadDay = async () => {
-      if (!ownerId || !selectedDate) { setDayAppointments([]); return; }
-      const { data } = await supabase
-        .from("appointments")
-        .select("*")
-        .eq("user_id", ownerId)
-        .eq("status", "confirmed")
-        .eq("date", format(selectedDate, "yyyy-MM-dd"));
-      setDayAppointments(data || []);
+      if (!ownerId || !selectedDate) {
+        setDayAppointments([]);
+        return;
+      }
+
+      const { data, error } = await supabase.rpc("get_public_booked_slots", {
+        p_owner_id: ownerId,
+        p_date: format(selectedDate, "yyyy-MM-dd"),
+      });
+
+      if (error) {
+        console.error("Erro ao carregar horários ocupados:", error);
+        setDayAppointments([]);
+        return;
+      }
+
+      setDayAppointments((data || []) as PublicBookedSlot[]);
     };
+
     loadDay();
   }, [ownerId, selectedDate]);
-
-  const selectedServiceName = services.find((s) => s.id === selectedService)?.name;
-  const selectedStaffName = staffList.find((s) => s.id === selectedStaff)?.name;
 
   const isSlotTaken = (time: string) => {
     return dayAppointments.some((a) => {
       if (a.time?.slice(0, 5) !== time) return false;
-      if (a.service_name !== selectedServiceName) return false;
-      if (hasStaff && selectedStaffName && a.staff_name !== selectedStaffName) return false;
+      if (a.service_id !== selectedService) return false;
+      if (hasStaff && selectedStaff && a.staff_id !== selectedStaff) return false;
       return true;
     });
   };
@@ -202,31 +218,35 @@ const PublicBooking = () => {
   const confirmStep = hasStaff ? 5 : 4;
 
   const handleConfirm = async () => {
-    if (!clientName.trim()) { toast.error("Digite seu nome"); return; }
-    const normalizedPhone = normalizePhone(clientPhone);
-    if (normalizedPhone.length < 10) { toast.error("Digite um telefone válido com DDD"); return; }
-    if (!ownerId) return;
-    const service = services.find((s) => s.id === selectedService);
-    const staffMember = staffList.find((s) => s.id === selectedStaff);
-
-    const insertData: Record<string, unknown> = {
-      user_id: ownerId,
-      client_name: clientName.trim(),
-      client_phone: normalizedPhone,
-      service_id: selectedService,
-      service_name: service?.name || "",
-      date: format(selectedDate!, "yyyy-MM-dd"),
-      time: selectedTime,
-      status: "confirmed",
-    };
-
-    if (staffMember) {
-      insertData.staff_id = staffMember.id;
-      insertData.staff_name = staffMember.name;
+    if (!clientName.trim()) {
+      toast.error("Digite seu nome");
+      return;
     }
 
-    const { error } = await supabase.from("appointments").insert(insertData);
-    if (error) { toast.error("Erro ao agendar. Tente novamente."); return; }
+    const normalizedPhone = normalizePhone(clientPhone);
+    if (normalizedPhone.length < 10) {
+      toast.error("Digite um telefone válido com DDD");
+      return;
+    }
+
+    if (!ownerId || !selectedService || !selectedDate || !selectedTime) return;
+
+    const { error } = await supabase.rpc("create_public_appointment", {
+      p_owner_id: ownerId,
+      p_service_id: selectedService,
+      p_staff_id: selectedStaff || null,
+      p_date: format(selectedDate, "yyyy-MM-dd"),
+      p_time: selectedTime,
+      p_client_name: clientName.trim(),
+      p_client_phone: normalizedPhone,
+    });
+
+    if (error) {
+      console.error("Erro ao criar agendamento:", error);
+      toast.error(error.message?.includes("horário") ? error.message : "Erro ao agendar. Tente novamente.");
+      return;
+    }
+
     setConfirmed(true);
     toast.success("Agendamento confirmado!");
   };
@@ -254,7 +274,21 @@ const PublicBooking = () => {
   };
 
   const handleCancelAppointment = async (id: string) => {
-    await supabase.from("appointments").update({ status: "cancelled" }).eq("id", id);
+    if (!ownerId) return;
+
+    const normalizedPhone = normalizePhone(searchPhone);
+    const { data, error } = await supabase.rpc("cancel_public_appointment", {
+      p_owner_id: ownerId,
+      p_appointment_id: id,
+      p_phone: normalizedPhone,
+    });
+
+    if (error || data !== true) {
+      console.error("Erro ao cancelar agendamento:", error);
+      toast.error("Não foi possível cancelar este agendamento.");
+      return;
+    }
+
     setFoundAppointments((prev) => prev.filter((a) => a.id !== id));
     toast.success("Agendamento cancelado");
   };
