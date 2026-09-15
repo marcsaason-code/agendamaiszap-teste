@@ -278,7 +278,7 @@ const PublicBooking = () => {
             <Button onClick={() => { resetBooking(); setViewMode("booking"); }} className="w-full bg-gradient-gold text-primary-foreground font-semibold py-6 text-base">
               <CalendarDays className="mr-2 h-5 w-5" /> Agendar horário
             </Button>
-            <Button variant="outline" onClick={() => { setSearched(false); setSearchName(""); setViewMode("manage"); }} className="w-full py-6 text-base">
+            <Button variant="outline" onClick={() => { setSearched(false); setSearchPhone(""); setFoundAppointments([]); setViewMode("manage"); }} className="w-full py-6 text-base">
               <Search className="mr-2 h-5 w-5" /> Meus agendamentos
             </Button>
           </div>
