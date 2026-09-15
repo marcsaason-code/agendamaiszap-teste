@@ -76,6 +76,7 @@ const PublicBooking = () => {
   const [ownerId, setOwnerId] = useState<string | null>(null);
   const [businessName, setBusinessName] = useState("");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
   const [businessHours, setBusinessHours] = useState<BusinessHours | null>(null);
   const [dayAppointments, setDayAppointments] = useState<Appointment[]>([]);
 
@@ -94,26 +95,39 @@ const PublicBooking = () => {
 
   useEffect(() => {
     const loadProfile = async () => {
-      if (!slug) return;
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("id, business_name, avatar_url, business_hours")
-        .eq("slug", slug)
-        .maybeSingle();
-      if (profile) {
-        setOwnerId(profile.id);
-        setBusinessName(profile.business_name);
-        setAvatarUrl(profile.avatar_url);
-        if (profile.business_hours) setBusinessHours(profile.business_hours as BusinessHours);
+      if (!slug) {
+        setProfileLoading(false);
+        return;
+      }
 
-        const [{ data: svcs }, { data: staffData }] = await Promise.all([
-          supabase.from("services").select("*").eq("user_id", profile.id).order("name"),
-          supabase.from("staff").select("id, name, role").eq("user_id", profile.id).order("name"),
-        ]);
-        if (svcs) setServices(svcs);
-        if (staffData) setStaffList(staffData);
+      setProfileLoading(true);
+
+      try {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("id, business_name, avatar_url, business_hours")
+          .eq("slug", slug)
+          .maybeSingle();
+
+        if (profile) {
+          setOwnerId(profile.id);
+          setBusinessName(profile.business_name);
+          setAvatarUrl(profile.avatar_url);
+          if (profile.business_hours) setBusinessHours(profile.business_hours as BusinessHours);
+
+          const [{ data: svcs }, { data: staffData }] = await Promise.all([
+            supabase.from("services").select("*").eq("user_id", profile.id).order("name"),
+            supabase.from("staff").select("id, name, role").eq("user_id", profile.id).order("name"),
+          ]);
+
+          if (svcs) setServices(svcs);
+          if (staffData) setStaffList(staffData);
+        }
+      } finally {
+        setProfileLoading(false);
       }
     };
+
     loadProfile();
   }, [slug]);
 
@@ -230,8 +244,17 @@ const PublicBooking = () => {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center px-4">
         <div className="w-full max-w-sm text-center">
-          {avatarUrl ? (
-            <img src={avatarUrl} alt={businessName} className="h-20 w-20 rounded-full object-cover mx-auto mb-4 border-2 border-border" />
+          {profileLoading ? (
+            <div
+              className="h-20 w-20 rounded-full bg-muted animate-pulse mx-auto mb-4"
+              aria-label="Carregando imagem do perfil"
+            />
+          ) : avatarUrl ? (
+            <img
+              src={avatarUrl}
+              alt={businessName}
+              className="h-20 w-20 rounded-full object-cover mx-auto mb-4 border-2 border-border"
+            />
           ) : (
             <img src={logoVertical} alt="Agenda+Zap" className="h-20 mx-auto mb-4" />
           )}
