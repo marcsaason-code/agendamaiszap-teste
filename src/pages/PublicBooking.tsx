@@ -205,9 +205,15 @@ const PublicBooking = () => {
   const isSlotTaken = (time: string) => {
     return dayAppointments.some((a) => {
       if (a.time?.slice(0, 5) !== time) return false;
-      if (a.service_id !== selectedService) return false;
-      if (hasStaff && selectedStaff && a.staff_id !== selectedStaff) return false;
-      return true;
+
+      // Com atendentes: o mesmo atendente não pode receber dois clientes
+      // no mesmo horário, independentemente do serviço escolhido.
+      if (hasStaff && selectedStaff) {
+        return a.staff_id === selectedStaff;
+      }
+
+      // Sem atendentes cadastrados: o horário pertence à agenda da empresa.
+      return a.staff_id == null;
     });
   };
 
@@ -260,7 +266,23 @@ const PublicBooking = () => {
 
     if (error) {
       console.error("Erro ao criar agendamento:", error);
-      toast.error(error.message?.includes("horário") ? error.message : "Erro ao agendar. Tente novamente.");
+
+      const message = error.message || "";
+      if (message.toLowerCase().includes("horário")) {
+        toast.error(message);
+        // Recarrega os horários ocupados para refletir imediatamente
+        // um agendamento que acabou de ser feito por outra pessoa.
+        const { data: refreshedSlots } = await supabase.rpc("get_public_booked_slots", {
+          p_owner_id: ownerId,
+          p_date: format(selectedDate, "yyyy-MM-dd"),
+        });
+        if (refreshedSlots) setDayAppointments(refreshedSlots as PublicBookedSlot[]);
+        setStep(timeStep);
+        setSelectedTime(null);
+      } else {
+        toast.error("Erro ao agendar. Tente novamente.");
+      }
+
       return;
     }
 
