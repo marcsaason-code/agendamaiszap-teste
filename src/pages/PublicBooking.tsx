@@ -59,6 +59,34 @@ function generateTimesFromSchedule(schedule: DaySchedule): string[] {
 
 const normalizePhone = (value: string) => value.replace(/\D/g, "");
 
+const buildPhoneVariants = (value: string) => {
+  const digits = normalizePhone(value);
+  const localDigits = digits.startsWith("55") && (digits.length === 12 || digits.length === 13)
+    ? digits.slice(2)
+    : digits;
+
+  if (localDigits.length < 10) return [digits];
+
+  const ddd = localDigits.slice(0, 2);
+  const number = localDigits.slice(2);
+  const firstPart = number.length === 9 ? number.slice(0, 5) : number.slice(0, 4);
+  const lastPart = number.length === 9 ? number.slice(5) : number.slice(4);
+  const formatted = `${firstPart}-${lastPart}`;
+
+  return Array.from(new Set([
+    digits,
+    localDigits,
+    `55${localDigits}`,
+    `+55${localDigits}`,
+    `+55 ${ddd} ${formatted}`,
+    `+55 (${ddd}) ${formatted}`,
+    `(${ddd}) ${formatted}`,
+    `${ddd} ${formatted}`,
+    `${ddd}-${formatted}`,
+    `${ddd}${formatted}`,
+  ].filter(Boolean)));
+};
+
 const PublicBooking = () => {
   const { slug } = useParams();
   const [viewMode, setViewMode] = useState<ViewMode>("home");
@@ -233,12 +261,16 @@ const PublicBooking = () => {
       return;
     }
 
+    const phoneVariants = buildPhoneVariants(searchPhone);
+
     const { data, error } = await supabase
       .from("appointments")
       .select("*")
       .eq("user_id", ownerId)
       .eq("status", "confirmed")
-      .eq("client_phone", normalizedPhone);
+      .in("client_phone", phoneVariants)
+      .order("date", { ascending: true })
+      .order("time", { ascending: true });
 
     if (error) {
       toast.error("Não foi possível buscar seus agendamentos.");
