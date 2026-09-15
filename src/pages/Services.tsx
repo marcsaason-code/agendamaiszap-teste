@@ -79,27 +79,56 @@ const Services = () => {
       toast.error("Preencha nome e duração");
       return;
     }
+
     if (editing) {
-      await supabase.from("services").update({
-        name, duration: Number(duration),
-        price: price ? Number(price) : null,
-        category: category || null,
-      }).eq("id", editing.id);
+      const { error } = await supabase
+        .from("services")
+        .update({
+          name,
+          duration: Number(duration),
+          price: price ? Number(price) : null,
+          category: category || null,
+        })
+        .eq("id", editing.id);
+
+      if (error) {
+        console.error("Erro ao atualizar serviço:", error);
+        toast.error("Não foi possível atualizar o serviço.");
+        return;
+      }
+
       toast.success("Serviço atualizado");
     } else {
-      await supabase.from("services").insert({
-        user_id: user!.id, name, duration: Number(duration),
+      const { error } = await supabase.from("services").insert({
+        user_id: user!.id,
+        name,
+        duration: Number(duration),
         price: price ? Number(price) : null,
         category: category || null,
       });
+
+      if (error) {
+        console.error("Erro ao criar serviço:", error);
+        toast.error("Não foi possível criar o serviço.");
+        return;
+      }
+
       toast.success("Serviço criado");
     }
+
     setDialogOpen(false);
-    fetchServices();
+    await fetchServices();
   };
 
   const handleDelete = async (id: string) => {
-    await supabase.from("services").delete().eq("id", id);
+    const { error } = await supabase.from("services").delete().eq("id", id);
+
+    if (error) {
+      console.error("Erro ao remover serviço:", error);
+      toast.error("Não foi possível remover o serviço.");
+      return;
+    }
+
     setServices((prev) => prev.filter((s) => s.id !== id));
     toast.success("Serviço removido");
   };
