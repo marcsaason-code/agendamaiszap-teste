@@ -57,6 +57,8 @@ function generateTimesFromSchedule(schedule: DaySchedule): string[] {
   return times;
 }
 
+const normalizePhone = (value: string) => value.replace(/\D/g, "");
+
 const PublicBooking = () => {
   const { slug } = useParams();
   const [viewMode, setViewMode] = useState<ViewMode>("home");
@@ -68,7 +70,7 @@ const PublicBooking = () => {
   const [clientName, setClientName] = useState("");
   const [clientPhone, setClientPhone] = useState("");
   const [confirmed, setConfirmed] = useState(false);
-  const [searchName, setSearchName] = useState("");
+  const [searchPhone, setSearchPhone] = useState("");
   const [foundAppointments, setFoundAppointments] = useState<Appointment[]>([]);
   const [searched, setSearched] = useState(false);
   const [services, setServices] = useState<Service[]>([]);
@@ -196,6 +198,8 @@ const PublicBooking = () => {
 
   const handleConfirm = async () => {
     if (!clientName.trim()) { toast.error("Digite seu nome"); return; }
+    const normalizedPhone = normalizePhone(clientPhone);
+    if (normalizedPhone.length < 10) { toast.error("Digite um telefone válido com DDD"); return; }
     if (!ownerId) return;
     const service = services.find((s) => s.id === selectedService);
     const staffMember = staffList.find((s) => s.id === selectedStaff);
@@ -203,7 +207,7 @@ const PublicBooking = () => {
     const insertData: Record<string, unknown> = {
       user_id: ownerId,
       client_name: clientName.trim(),
-      client_phone: clientPhone || null,
+      client_phone: normalizedPhone,
       service_id: selectedService,
       service_name: service?.name || "",
       date: format(selectedDate!, "yyyy-MM-dd"),
@@ -223,13 +227,24 @@ const PublicBooking = () => {
   };
 
   const handleSearch = async () => {
-    if (!ownerId || !searchName.trim()) return;
-    const { data } = await supabase
+    const normalizedPhone = normalizePhone(searchPhone);
+    if (!ownerId || normalizedPhone.length < 10) {
+      toast.error("Digite um telefone válido com DDD");
+      return;
+    }
+
+    const { data, error } = await supabase
       .from("appointments")
       .select("*")
       .eq("user_id", ownerId)
       .eq("status", "confirmed")
-      .ilike("client_name", `%${searchName}%`);
+      .eq("client_phone", normalizedPhone);
+
+    if (error) {
+      toast.error("Não foi possível buscar seus agendamentos.");
+      return;
+    }
+
     setFoundAppointments(data || []);
     setSearched(true);
   };
@@ -281,7 +296,13 @@ const PublicBooking = () => {
           </Button>
           <h2 className="text-xl font-bold text-foreground mb-4">Meus agendamentos</h2>
           <div className="flex gap-2 mb-4">
-            <Input value={searchName} onChange={(e) => setSearchName(e.target.value)} placeholder="Seu nome" />
+            <Input
+              type="tel"
+              inputMode="tel"
+              value={searchPhone}
+              onChange={(e) => setSearchPhone(e.target.value)}
+              placeholder="Seu telefone com DDD"
+            />
             <Button onClick={handleSearch} className="bg-gradient-gold text-primary-foreground">Buscar</Button>
           </div>
           {searched && foundAppointments.length === 0 && (
@@ -445,7 +466,15 @@ const PublicBooking = () => {
               <div>
                 <h2 className="text-lg font-bold text-foreground mb-4">Seus dados</h2>
                 <Input value={clientName} onChange={(e) => setClientName(e.target.value)} placeholder="Seu nome" className="mb-3" />
-                <Input value={clientPhone} onChange={(e) => setClientPhone(e.target.value)} placeholder="Telefone (opcional)" className="mb-4" />
+                <Input
+                  type="tel"
+                  inputMode="tel"
+                  value={clientPhone}
+                  onChange={(e) => setClientPhone(e.target.value)}
+                  placeholder="Telefone com DDD"
+                  className="mb-4"
+                  required
+                />
                 <div className="glass-card p-4 mb-4 text-sm space-y-1">
                   <p className="text-muted-foreground flex items-center gap-2"><Sparkles className="h-3.5 w-3.5" /> {services.find((s) => s.id === selectedService)?.name}</p>
                   {selectedStaff && (
