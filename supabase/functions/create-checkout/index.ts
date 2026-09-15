@@ -1,4 +1,3 @@
-import Stripe from "npm:stripe@17.7.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -6,8 +5,34 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const PLAN_PRICE_CENTS = 1990; // R$ 19,90/mês
+const PLAN_PRICE_CENTS = 1990;
 const PLAN_NAME = "Agenda+Zap - Plano mensal";
+const STRIPE_API_VERSION = "2025-04-30.basil";
+
+async function stripeRequest(
+  stripeSecretKey: string,
+  path: string,
+  options: RequestInit = {},
+) {
+  const response = await fetch(`https://api.stripe.com/v1${path}`, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${stripeSecretKey}`,
+      "Stripe-Version": STRIPE_API_VERSION,
+      ...(options.headers || {}),
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      data?.error?.message || `Erro Stripe (${response.status})`,
+    );
+  }
+
+  return data;
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -16,6 +41,7 @@ Deno.serve(async (req) => {
 
   try {
     const authHeader = req.headers.get("Authorization");
+
     if (!authHeader) {
       return new Response(JSON.stringify({ error: "Missing auth" }), {
         status: 401,
@@ -47,88 +73,140 @@ Deno.serve(async (req) => {
       });
     }
 
-    const stripe = new Stripe(stripeSecretKey, {
-      apiVersion: "2025-04-30.basil" as any,
-    });
+    // Evita criar uma segunda assinatura ativa.
+    const existingSubscriptionId =
+      user.app_metadata?.stripe_subscription_id as string | undefined;
 
-    // Avoid creating a second active subscription for the same account.
-    const existingSubscriptionId = user.app_metadata?.stripe_subscription_id as string | undefined;
     if (existingSubscriptionId) {
       try {
-        const existing = await stripe.subscriptions.retrieve(existingSubscriptionId);
+        const existing = await stripeRequest(
+          stripeSecretKey,
+          `/subscriptions/${encodeURIComponent(existingSubscriptionId)}`,
+          { method: "GET" },
+        );
+
         if (["active", "trialing", "past_due"].includes(existing.status)) {
-          return new Response(JSON.stringify({ error: "Assinatura já existente" }), {
-            status: 409,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
+          return new Response(
+            JSON.stringify({ error: "Assinatura já existente" }),
+            {
+              status: 409,
+              headers: {
+                ...corsHeaders,
+                "Content-Type": "application/json",
+              },
+            },
+          );
         }
       } catch (error) {
-        console.warn("Could not verify existing Stripe subscription:", error);
+        console.warn("Não foi possível verificar assinatura existente:", error);
       }
     }
 
     const body = await req.json().catch(() => ({}));
-    const returnUrl = body.returnUrl || req.headers.get("origin") || "https://app.agendamaiszap.com.br/subscription";
+
+    const returnUrl =
+      body.returnUrl ||
+      req.headers.get("origin") ||
+      "https://app.agendamaiszap.com.br/subscription";
+
     const successUrl = `${returnUrl}?success=true`;
     const cancelUrl = `${returnUrl}?canceled=true`;
 
     const configuredPriceId = Deno.env.get("STRIPE_PRICE_ID");
-    const lineItem: Stripe.Checkout.SessionCreateParams.LineItem = configuredPriceId
-      ? { price: configuredPriceId, quantity: 1 }
-      : {
-          quantity: 1,
-          price_data: {
-            currency: "brl",
-            unit_amount: PLAN_PRICE_CENTS,
-            recurring: { interval: "month" },
-            product_data: {
-              name: PLAN_NAME,
-              description: "Agenda online com link público de agendamento",
-            },
-          },
-        };
+    const customerId =
+      user.app_metadata?.stripe_customer_id as string | undefined;
 
-    const customerId = user.app_metadata?.stripe_customer_id as string | undefined;
+    const params = new URLSearchParams();
 
-    const session = await stripe.checkout.sessions.create({
-      mode: "subscription",
-      // Exibe diretamente o formulário de cartão no Stripe Checkout.
-      // Sem esta lista explícita, o Stripe pode priorizar o Link para clientes já cadastrados nele.
-      payment_method_types: ["card"],
-      // Desativa explicitamente o Stripe Link para esta sessão.
-      // Assim o Checkout abre no formulário de cartão, sem a etapa de confirmação do Link.
-      wallet_options: {
-        link: { display: "never" },
-      },
-      ...(customerId ? { customer: customerId } : { customer_email: user.email || undefined }),
-      line_items: [lineItem],
-      success_url: successUrl,
-      cancel_url: cancelUrl,
-      client_reference_id: user.id,
-      metadata: {
-        user_id: user.id,
-        plan: "agenda-mais-zap-mensal-1990",
-      },
-      subscription_data: {
-        metadata: {
-          user_id: user.id,
-          plan: "agenda-mais-zap-mensal-1990",
+    params.set("mode", "subscription");
+
+    // FORÇA CARTÃO.
+    params.set("payment_method_types[0]", "card");
+
+    // DESATIVA O STRIPE LINK NESTA SESSÃO.
+    // Enviado diretamente para a API Stripe usando a versão Basil,
+    // evitando qualquer incompatibilidade do SDK.
+    params.set("wallet_options[link][display]", "never");
+
+    params.set("line_items[0][quantity]", "1");
+
+    if (configuredPriceId) {
+      params.set("line_items[0][price]", configuredPriceId);
+    } else {
+      params.set("line_items[0][price_data][currency]", "brl");
+      params.set(
+        "line_items[0][price_data][unit_amount]",
+        String(PLAN_PRICE_CENTS),
+      );
+      params.set(
+        "line_items[0][price_data][recurring][interval]",
+        "month",
+      );
+      params.set(
+        "line_items[0][price_data][product_data][name]",
+        PLAN_NAME,
+      );
+      params.set(
+        "line_items[0][price_data][product_data][description]",
+        "Agenda+Zap - Sua agenda online!",
+      );
+    }
+
+    // Se já existir Customer no Stripe, reutiliza.
+    // Se não existir, NÃO enviamos customer_email:
+    // o Checkout coleta o e-mail normalmente e evita iniciar o fluxo Link
+    // automaticamente com um e-mail pré-preenchido.
+    if (customerId) {
+      params.set("customer", customerId);
+    }
+
+    params.set("success_url", successUrl);
+    params.set("cancel_url", cancelUrl);
+    params.set("client_reference_id", user.id);
+
+    params.set("metadata[user_id]", user.id);
+    params.set("metadata[plan]", "agenda-mais-zap-mensal-1990");
+
+    params.set("subscription_data[metadata][user_id]", user.id);
+    params.set(
+      "subscription_data[metadata][plan]",
+      "agenda-mais-zap-mensal-1990",
+    );
+
+    params.set("allow_promotion_codes", "false");
+    params.set("billing_address_collection", "auto");
+
+    const session = await stripeRequest(
+      stripeSecretKey,
+      "/checkout/sessions",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
         },
+        body: params.toString(),
       },
-      allow_promotion_codes: false,
-      billing_address_collection: "auto",
-    } as any);
+    );
 
-    if (!session.url) {
+    if (!session?.url) {
       throw new Error("Stripe não retornou uma URL de checkout");
     }
+
+    console.log("Stripe Checkout criado:", {
+      id: session.id,
+      payment_method_types: session.payment_method_types,
+      wallet_options: session.wallet_options,
+    });
 
     return new Response(JSON.stringify({ url: session.url }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Erro desconhecido";
+    const message =
+      error instanceof Error ? error.message : "Erro desconhecido";
+
     console.error("create-checkout error:", error);
+
     return new Response(JSON.stringify({ error: message }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
