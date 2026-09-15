@@ -59,25 +59,28 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // Check subscription record (status maintained by Stripe webhook)
     const { data } = await supabase
       .from("subscriptions")
-      .select("*")
+      .select("status, trial_start")
       .eq("user_id", userId)
       .maybeSingle();
 
     if (data?.status === "active") {
       setSubscriptionStatus("active");
+      setTrialDaysRemaining(0);
       return;
     }
 
-    if (data?.trial_start) {
+    if (data?.status === "trial" && data.trial_start) {
       const elapsed = Math.floor((Date.now() - new Date(data.trial_start).getTime()) / (1000 * 60 * 60 * 24));
       const remaining = Math.max(0, 3 - elapsed);
       setTrialDaysRemaining(remaining);
       setSubscriptionStatus(elapsed >= 3 ? "expired" : "trial");
-    } else {
-      // No subscription record — treat as new trial
-      setSubscriptionStatus("trial");
-      setTrialDaysRemaining(3);
+      return;
     }
+
+    // Segurança: ausência de registro, status inesperado ou assinatura vencida
+    // nunca concede um novo trial automaticamente. Falha de forma fechada.
+    setTrialDaysRemaining(0);
+    setSubscriptionStatus("expired");
   }, []);
 
   useEffect(() => {
