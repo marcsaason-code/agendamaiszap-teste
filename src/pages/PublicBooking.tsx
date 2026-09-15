@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Calendar } from "@/components/ui/calendar";
 import { format, getDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Check, Sparkles, CalendarDays, Clock, Search, ArrowLeft, UserRound } from "lucide-react";
+import { Check, Sparkles, CalendarDays, Clock, Search, ArrowLeft, UserRound, Store } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
@@ -92,6 +92,7 @@ const PublicBooking = () => {
   const [businessName, setBusinessName] = useState("");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
+  const [publicBookingAvailable, setPublicBookingAvailable] = useState<boolean | null>(null);
   const [businessHours, setBusinessHours] = useState<BusinessHours | null>(null);
   const [dayAppointments, setDayAppointments] = useState<PublicBookedSlot[]>([]);
 
@@ -129,6 +130,22 @@ const PublicBooking = () => {
           setBusinessName(profile.business_name);
           setAvatarUrl(profile.avatar_url);
           if (profile.business_hours) setBusinessHours(profile.business_hours as BusinessHours);
+
+          const { data: bookingAvailable, error: bookingStatusError } = await supabase.rpc(
+            "get_public_booking_status",
+            { p_owner_id: profile.id }
+          );
+
+          if (bookingStatusError) {
+            console.error("Erro ao consultar disponibilidade pública:", bookingStatusError);
+            setPublicBookingAvailable(false);
+            return;
+          }
+
+          const isAvailable = bookingAvailable === true;
+          setPublicBookingAvailable(isAvailable);
+
+          if (!isAvailable) return;
 
           const [{ data: svcs }, { data: staffData }] = await Promise.all([
             supabase.from("services").select("*").eq("user_id", profile.id).order("name"),
@@ -292,6 +309,57 @@ const PublicBooking = () => {
     setFoundAppointments((prev) => prev.filter((a) => a.id !== id));
     toast.success("Agendamento cancelado");
   };
+
+  if (!profileLoading && ownerId && publicBookingAvailable === false && viewMode !== "manage") {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center px-4">
+        <div className="w-full max-w-sm text-center">
+          {avatarUrl ? (
+            <img
+              src={avatarUrl}
+              alt={businessName}
+              className="h-20 w-20 rounded-full object-cover mx-auto mb-4 border-2 border-border"
+            />
+          ) : (
+            <img src={logoVertical} alt="Agenda+Zap" className="h-20 mx-auto mb-4" />
+          )}
+
+          <p className="text-muted-foreground mb-6">
+            {businessName || slug?.replace(/-/g, " ") || "Agendamento online"}
+          </p>
+
+          <div className="glass-card p-6 text-center">
+            <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
+              <Store className="h-6 w-6 text-muted-foreground" />
+            </div>
+
+            <h2 className="text-lg font-bold text-foreground mb-2">
+              Agendamentos indisponíveis no momento
+            </h2>
+
+            <p className="text-sm text-muted-foreground leading-relaxed mb-5">
+              Esta empresa não está recebendo novos agendamentos por este link no momento.
+              Entre em contato diretamente com {businessName || "a empresa"} para consultar disponibilidade.
+            </p>
+
+            <Button
+              variant="outline"
+              onClick={() => {
+                setSearched(false);
+                setSearchPhone("");
+                setFoundAppointments([]);
+                setViewMode("manage");
+              }}
+              className="w-full py-5"
+            >
+              <Search className="mr-2 h-4 w-4" />
+              Consultar meus agendamentos
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (viewMode === "home") {
     return (
