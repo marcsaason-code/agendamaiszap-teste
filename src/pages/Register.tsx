@@ -38,8 +38,9 @@ const Register = () => {
     } else {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
+        // O registro da assinatura/trial agora é criado automaticamente
+        // pelo banco (trigger server-side). O navegador não pode alterar status.
         await supabase.from("profiles").update({ slug }).eq("id", user.id);
-        await supabase.from("subscriptions").insert({ user_id: user.id, status: "trial" });
       }
       toast.success("Conta criada com sucesso! Você tem 3 dias de teste grátis.");
       navigate("/dashboard");
