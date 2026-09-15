@@ -338,7 +338,6 @@ const PublicBooking = () => {
             </h2>
 
             <p className="text-sm text-muted-foreground leading-relaxed mb-5">
-              Esta empresa não está recebendo novos agendamentos por este link no momento.
               Entre em contato diretamente com {businessName || "a empresa"} para consultar disponibilidade.
             </p>
 
