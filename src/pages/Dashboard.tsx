@@ -8,7 +8,7 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { CalendarDays, Clock, User, Sparkles, X, Pencil, Crown, AlertTriangle, Plus } from "lucide-react";
+import { CalendarDays, Clock, User, Phone, Sparkles, X, Pencil, Crown, AlertTriangle, Plus } from "lucide-react";
 import ExpiredBanner from "@/components/ExpiredBanner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -19,6 +19,7 @@ import { useAuth } from "@/contexts/AuthContext";
 interface Appointment {
   id: string;
   client_name: string;
+  client_phone?: string | null;
   service_name: string;
   date: string;
   time: string;
@@ -46,6 +47,7 @@ const Dashboard = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTime, setEditTime] = useState("");
   const [editName, setEditName] = useState("");
+  const [editPhone, setEditPhone] = useState("");
 
   // --- Novo agendamento (criação manual) ---
   const [creating, setCreating] = useState(false);
@@ -60,6 +62,18 @@ const Dashboard = () => {
   const [newTime, setNewTime] = useState("");
 
   const hasStaff = staffList.length > 0;
+
+  const formatPhone = (phone?: string | null) => {
+    if (!phone) return "Telefone não informado";
+    const digits = phone.replace(/\D/g, "");
+    if (digits.length === 11) {
+      return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+    }
+    if (digits.length === 10) {
+      return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+    }
+    return phone;
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -187,14 +201,22 @@ const Dashboard = () => {
       setEditingId(id);
       setEditTime(appt.time);
       setEditName(appt.client_name);
+      setEditPhone(appt.client_phone ?? "");
     }
   };
 
   const handleSaveEdit = async () => {
     if (!editingId) return;
-    await supabase.from("appointments").update({ time: editTime, client_name: editName }).eq("id", editingId);
+    await supabase
+      .from("appointments")
+      .update({ time: editTime, client_name: editName, client_phone: editPhone.trim() })
+      .eq("id", editingId);
     setAppointments((prev) =>
-      prev.map((a) => (a.id === editingId ? { ...a, time: editTime, client_name: editName } : a))
+      prev.map((a) =>
+        a.id === editingId
+          ? { ...a, time: editTime, client_name: editName, client_phone: editPhone.trim() }
+          : a,
+      )
     );
     setEditingId(null);
     toast.success("Agendamento atualizado");
@@ -273,6 +295,9 @@ const Dashboard = () => {
                     <p className="text-sm font-medium text-foreground flex items-center gap-1.5">
                       <User className="h-3.5 w-3.5" /> {a.client_name}
                     </p>
+                    <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5">
+                      <Phone className="h-3 w-3" /> {formatPhone(a.client_phone)}
+                    </p>
                     <p className="text-xs text-muted-foreground flex items-center gap-1.5">
                       <Sparkles className="h-3 w-3" /> {a.service_name}
                       {a.staff_name ? ` • ${a.staff_name}` : ""}
@@ -308,6 +333,16 @@ const Dashboard = () => {
             <div>
               <Label>Nome do cliente</Label>
               <Input value={editName} onChange={(e) => setEditName(e.target.value)} className="mt-1" />
+            </div>
+            <div>
+              <Label>Telefone do cliente</Label>
+              <Input
+                value={editPhone}
+                onChange={(e) => setEditPhone(e.target.value)}
+                className="mt-1"
+                placeholder="Ex: (11) 99999-9999"
+                inputMode="tel"
+              />
             </div>
             <div>
               <Label>Horário</Label>
