@@ -254,10 +254,69 @@ const PublicBooking = () => {
 
     if (!ownerId || !selectedService || !selectedDate || !selectedTime) return;
 
+    // Confirma o atendente novamente no banco antes de concluir.
+    // Isso evita enviar um ID antigo caso o atendente tenha sido recriado/editado
+    // enquanto a página pública estava aberta.
+    let staffIdForBooking: string | null = null;
+
+    if (hasStaff) {
+      if (!selectedStaff) {
+        toast.error("Escolha um atendente");
+        setStep(2);
+        return;
+      }
+
+      const selectedStaffSnapshot = staffList.find((staff) => staff.id === selectedStaff);
+
+      if (!selectedStaffSnapshot) {
+        toast.error("Atendente não encontrado. Escolha novamente.");
+        setStep(2);
+        return;
+      }
+
+      const { data: currentStaff, error: staffRefreshError } = await supabase
+        .from("staff")
+        .select("id, name, role")
+        .eq("user_id", ownerId)
+        .order("name");
+
+      if (staffRefreshError) {
+        console.error("Erro ao validar atendente:", staffRefreshError);
+        toast.error("Não foi possível validar o atendente. Tente novamente.");
+        return;
+      }
+
+      const freshStaff =
+        (currentStaff || []).find((staff) => staff.id === selectedStaff) ||
+        (currentStaff || []).find(
+          (staff) =>
+            staff.name.trim().toLocaleLowerCase("pt-BR") ===
+            selectedStaffSnapshot.name.trim().toLocaleLowerCase("pt-BR")
+        );
+
+      if (!freshStaff) {
+        toast.error("Este atendente não está mais disponível. Escolha outro.");
+        setStaffList((currentStaff || []) as StaffMember[]);
+        setSelectedStaff(null);
+        setSelectedTime(null);
+        setStep(2);
+        return;
+      }
+
+      staffIdForBooking = freshStaff.id;
+
+      // Se o registro foi recriado e recebeu outro ID, sincroniza o estado.
+      if (freshStaff.id !== selectedStaff) {
+        setSelectedStaff(freshStaff.id);
+      }
+
+      setStaffList((currentStaff || []) as StaffMember[]);
+    }
+
     const { error } = await supabase.rpc("create_public_appointment", {
       p_owner_id: ownerId,
       p_service_id: selectedService,
-      p_staff_id: selectedStaff || null,
+      p_staff_id: staffIdForBooking,
       p_date: format(selectedDate, "yyyy-MM-dd"),
       p_time: selectedTime,
       p_client_name: clientName.trim(),
@@ -268,7 +327,9 @@ const PublicBooking = () => {
       console.error("Erro ao criar agendamento:", error);
 
       const message = error.message || "";
-      if (message.toLowerCase().includes("horário")) {
+      const lowerMessage = message.toLowerCase();
+
+      if (lowerMessage.includes("horário")) {
         toast.error(message);
         // Recarrega os horários ocupados para refletir imediatamente
         // um agendamento que acabou de ser feito por outra pessoa.
@@ -279,7 +340,16 @@ const PublicBooking = () => {
         if (refreshedSlots) setDayAppointments(refreshedSlots as PublicBookedSlot[]);
         setStep(timeStep);
         setSelectedTime(null);
+      } else if (lowerMessage.includes("atendente")) {
+        toast.error("Não foi possível confirmar com este atendente. Escolha o atendente novamente.");
+        setSelectedStaff(null);
+        setSelectedTime(null);
+        setStep(2);
+      } else if (lowerMessage.includes("account_access_expired")) {
+        toast.error("Esta empresa não está recebendo novos agendamentos no momento.");
       } else {
+        // Mantemos o detalhe no console para diagnóstico sem expor mensagens
+        // internas do banco ao cliente final.
         toast.error("Erro ao agendar. Tente novamente.");
       }
 
@@ -521,6 +591,8 @@ const PublicBooking = () => {
                       key={s.id}
                       onClick={() => {
                         setSelectedStaff(s.id);
+                        setSelectedDate(undefined);
+                        setSelectedTime(null);
                         setStep(3);
                       }}
                       className={cn(
