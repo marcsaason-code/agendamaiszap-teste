@@ -119,42 +119,35 @@ const PublicBooking = () => {
       setProfileLoading(true);
 
       try {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("id, business_name, avatar_url, business_hours")
-          .eq("slug", slug)
-          .maybeSingle();
+        // Toda a informação pública necessária chega por uma RPC controlada.
+        // A página anônima não lê diretamente profiles/services/staff.
+        const { data, error } = await supabase.rpc("get_public_booking_page", {
+          p_slug: slug,
+        });
 
-        if (profile) {
-          setOwnerId(profile.id);
-          setBusinessName(profile.business_name);
-          setAvatarUrl(profile.avatar_url);
-          if (profile.business_hours) setBusinessHours(profile.business_hours as BusinessHours);
-
-          const { data: bookingAvailable, error: bookingStatusError } = await supabase.rpc(
-            "get_public_booking_status",
-            { p_owner_id: profile.id }
-          );
-
-          if (bookingStatusError) {
-            console.error("Erro ao consultar disponibilidade pública:", bookingStatusError);
-            setPublicBookingAvailable(false);
-            return;
-          }
-
-          const isAvailable = bookingAvailable === true;
-          setPublicBookingAvailable(isAvailable);
-
-          if (!isAvailable) return;
-
-          const [{ data: svcs }, { data: staffData }] = await Promise.all([
-            supabase.from("services").select("*").eq("user_id", profile.id).order("name"),
-            supabase.from("staff").select("id, name, role").eq("user_id", profile.id).order("name"),
-          ]);
-
-          if (svcs) setServices(svcs);
-          if (staffData) setStaffList(staffData);
+        if (error) {
+          console.error("Erro ao carregar página pública:", error);
+          setPublicBookingAvailable(false);
+          return;
         }
+
+        if (!data?.profile) {
+          setPublicBookingAvailable(false);
+          return;
+        }
+
+        const profile = data.profile;
+        setOwnerId(profile.id);
+        setBusinessName(profile.business_name || "");
+        setAvatarUrl(profile.avatar_url || null);
+        if (profile.business_hours) {
+          setBusinessHours(profile.business_hours as BusinessHours);
+        }
+
+        const isAvailable = data.booking_available === true;
+        setPublicBookingAvailable(isAvailable);
+        setServices((data.services || []) as Service[]);
+        setStaffList((data.staff || []) as StaffMember[]);
       } finally {
         setProfileLoading(false);
       }
