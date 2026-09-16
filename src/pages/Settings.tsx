@@ -59,21 +59,61 @@ const Settings = () => {
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !user) return;
-    setUploading(true);
-    const ext = file.name.split(".").pop();
-    const path = `${user.id}/logo.${ext}`;
-    const { error: uploadError } = await supabase.storage.from("logos").upload(path, file, { upsert: true });
-    if (uploadError) {
-      toast.error("Erro ao enviar logo. Verifique se o bucket 'logos' existe.");
-      setUploading(false);
+
+    const allowedTypes: Record<string, string> = {
+      "image/jpeg": "jpg",
+      "image/png": "png",
+      "image/webp": "webp",
+    };
+
+    if (!allowedTypes[file.type]) {
+      toast.error("Envie uma imagem JPG, PNG ou WEBP.");
+      e.target.value = "";
       return;
     }
-    const { data: urlData } = supabase.storage.from("logos").getPublicUrl(path);
-    const urlWithCacheBust = `${urlData.publicUrl}?t=${Date.now()}`;
-    await supabase.from("profiles").update({ avatar_url: urlWithCacheBust }).eq("id", user.id);
-    await refreshProfile();
-    toast.success("Logo atualizado!");
-    setUploading(false);
+
+    const maxSize = 2 * 1024 * 1024;
+    if (file.size > maxSize) {
+      toast.error("A imagem deve ter no máximo 2 MB.");
+      e.target.value = "";
+      return;
+    }
+
+    setUploading(true);
+
+    try {
+      const ext = allowedTypes[file.type];
+      const path = `${user.id}/logo.${ext}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("logos")
+        .upload(path, file, {
+          upsert: true,
+          contentType: file.type,
+          cacheControl: "3600",
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { data: urlData } = supabase.storage.from("logos").getPublicUrl(path);
+      const urlWithCacheBust = `${urlData.publicUrl}?t=${Date.now()}`;
+
+      const { error: profileError } = await supabase
+        .from("profiles")
+        .update({ avatar_url: urlWithCacheBust })
+        .eq("id", user.id);
+
+      if (profileError) throw profileError;
+
+      await refreshProfile();
+      toast.success("Logo atualizado!");
+    } catch (error) {
+      console.error("Erro ao atualizar logo:", error);
+      toast.error("Não foi possível atualizar o logo. Tente novamente.");
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
   };
 
   const handleUpdateEmail = async () => {
@@ -85,7 +125,12 @@ const Settings = () => {
 
   const handleUpdatePhone = async () => {
     if (!user) return;
-    await supabase.from("profiles").update({ phone: newPhone }).eq("id", user.id);
+    const { error } = await supabase.from("profiles").update({ phone: newPhone }).eq("id", user.id);
+    if (error) {
+      console.error("Erro ao atualizar telefone:", error);
+      toast.error("Não foi possível atualizar o telefone.");
+      return;
+    }
     await refreshProfile();
     toast.success("Telefone atualizado!");
     setEditPhone(false);
@@ -93,7 +138,12 @@ const Settings = () => {
 
   const handleUpdateName = async () => {
     if (!user || !newName.trim()) return;
-    await supabase.from("profiles").update({ business_name: newName.trim() }).eq("id", user.id);
+    const { error } = await supabase.from("profiles").update({ business_name: newName.trim() }).eq("id", user.id);
+    if (error) {
+      console.error("Erro ao atualizar nome do negócio:", error);
+      toast.error("Não foi possível atualizar o nome do negócio.");
+      return;
+    }
     await refreshProfile();
     toast.success("Nome do negócio atualizado!");
     setEditName(false);
@@ -144,7 +194,7 @@ const Settings = () => {
               <div className="absolute inset-0 flex items-center justify-center bg-background/60 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
                 <Camera className="h-6 w-6 text-foreground" />
               </div>
-              <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
+              <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handleLogoUpload} />
             </div>
             <p className="text-sm text-muted-foreground">{uploading ? "Enviando..." : "Toque para alterar o logo"}</p>
 
