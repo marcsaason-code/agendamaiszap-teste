@@ -348,11 +348,7 @@ const PublicBooking = () => {
       } else if (lowerMessage.includes("account_access_expired")) {
         toast.error("Esta empresa não está recebendo novos agendamentos no momento.");
       } else {
-        // Diagnóstico temporário: exibe a mensagem real retornada pelo Supabase
-        // para identificarmos exatamente o bloqueio restante.
-        toast.error(`Erro técnico: ${error.code || "sem código"} — ${message || "sem mensagem"}`, {
-          duration: 12000,
-        });
+        toast.error("Erro ao agendar. Tente novamente.");
       }
 
       return;
